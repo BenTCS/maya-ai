@@ -1,24 +1,40 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Sparkles } from 'lucide-react'
-import { suggestions, type Message } from '@/lib/mock-ai'
+import { Sparkles, Coins, LogIn, LayoutDashboard, LogOut } from 'lucide-react'
+import {
+  suggestions,
+  ANON_MESSAGE_LIMIT,
+  type Message,
+} from '@/lib/mock-ai'
+import { useAuth } from '@/components/auth/auth-provider'
+import { supabase } from '@/lib/supabase/client'
 import { MessageBubble } from './message-bubble'
 import { ChatComposer } from './chat-composer'
 import { TypingIndicator } from './typing-indicator'
-
-// Where your own server.py is running. Change this if you deploy it
-// somewhere other than localhost.
-const API_URL = 'http://localhost:8000/chat'
 
 function uid() {
   return Math.random().toString(36).slice(2, 10)
 }
 
+// Simulated thinking: a logged-out user gets short waits, a logged-in user
+// gets longer "deeper" thinking so credits are actually deducted.
+function thinkDurationMs(isAuthed: boolean): number {
+  const base = isAuthed ? 1800 : 700
+  return base + Math.floor(Math.random() * (isAuthed ? 2200 : 600))
+}
+
 export function ChatView() {
+  const { user, profile, loading, signOut, refreshProfile } = useAuth()
   const [messages, setMessages] = useState<Message[]>([])
   const [thinking, setThinking] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  const isAuthed = !!user
+  const anonMessageCount = messages.filter((m) => m.role === 'user').length
+  const anonLimitReached = !isAuthed && anonMessageCount >= ANON_MESSAGE_LIMIT
+  const credits = profile?.credits ?? 0
+  const outOfCredits = isAuthed && credits <= 0
 
   const hasMessages = messages.length > 0
 
@@ -30,44 +46,47 @@ export function ChatView() {
   }, [messages, thinking])
 
   async function handleSend(text: string) {
+    if (anonLimitReached || outOfCredits || thinking) return
+
     const userMessage: Message = { id: uid(), role: 'user', content: text }
     setMessages((prev) => [...prev, userMessage])
     setThinking(true)
 
-    try {
-      const res = await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text }),
+    const thinkMs = thinkDurationMs(isAuthed)
+    const startedAt = performance.now()
+
+    // Simulate the "thinking" delay; in a real deployment this is where the
+    // model call would happen and the elapsed wall-clock would be billed.
+    await new Promise((r) => setTimeout(r, thinkMs))
+
+    // Generate a reply from the local mock-AI pool.
+    const { generateReply } = await import('@/lib/mock-ai')
+    const answer = generateReply(text)
+
+    let creditsUsed: number | undefined
+    if (isAuthed) {
+      // Bill the user: 0.01 credits per 0.01s = 1 credit per second.
+      const { error } = await supabase.rpc('deduct_credits', {
+        p_thinking_ms: thinkMs,
       })
-
-      if (!res.ok) {
-        throw new Error(`Server responded with ${res.status}`)
+      if (!error) {
+        creditsUsed = thinkMs / 1000
+        await refreshProfile()
       }
-
-      const data: { answer: string; sources?: string[] } = await res.json()
-
-      const reply = data.sources?.length
-        ? `${data.answer}\n\nSources: ${data.sources.join(', ')}`
-        : data.answer
-
-      setMessages((prev) => [
-        ...prev,
-        { id: uid(), role: 'assistant', content: reply },
-      ])
-    } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: uid(),
-          role: 'assistant',
-          content:
-            "Couldn't reach the local AI server. Make sure server.py is running (python server.py) at localhost:8000.",
-        },
-      ])
-    } finally {
-      setThinking(false)
     }
+
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: uid(),
+        role: 'assistant',
+        content: answer,
+        thinkingMs: thinkMs,
+        creditsUsed,
+      },
+    ])
+    setThinking(false)
+    void startedAt
   }
 
   return (
@@ -84,10 +103,42 @@ export function ChatView() {
             </p>
           </div>
         </div>
-        <span className="flex items-center gap-1.5 font-mono text-[0.65rem] uppercase tracking-[0.16em] text-muted-foreground">
-          <span className="size-1.5 rounded-full bg-primary" />
-          Online
-        </span>
+
+        <div className="flex items-center gap-3">
+          {isAuthed && (
+            <span className="flex items-center gap-1.5 rounded-full border border-border/60 bg-card/60 px-2.5 py-1 font-mono text-[0.65rem] uppercase tracking-[0.14em] text-muted-foreground">
+              <Coins className="size-3" />
+              {credits.toLocaleString(undefined, { maximumFractionDigits: 1 })}
+            </span>
+          )}
+          {isAuthed ? (
+            <>
+              <a
+                href="/dashboard"
+                className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                aria-label="Dashboard"
+              >
+                <LayoutDashboard className="size-4" />
+              </a>
+              <button
+                type="button"
+                onClick={signOut}
+                className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                aria-label="Sign out"
+              >
+                <LogOut className="size-4" />
+              </button>
+            </>
+          ) : (
+            <a
+              href="/login"
+              className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+              aria-label="Sign in"
+            >
+              <LogIn className="size-4" />
+            </a>
+          )}
+        </div>
       </header>
 
       <div
@@ -107,8 +158,9 @@ export function ChatView() {
                 How can I help you today?
               </h1>
               <p className="text-pretty text-sm text-muted-foreground">
-                Ask me anything about your documents — answered by your own
-                local model.
+                {isAuthed
+                  ? 'Ask me anything — your thinking time is billed in credits.'
+                  : `Ask me anything. Guests get ${ANON_MESSAGE_LIMIT} free messages — sign in for more.`}
               </p>
             </div>
             <div className="grid w-full max-w-md grid-cols-1 gap-2 sm:grid-cols-2">
@@ -141,12 +193,45 @@ export function ChatView() {
             </div>
           </div>
         )}
+
+        {anonLimitReached && !thinking && (
+          <div className="animate-fade-up rounded-2xl border border-primary/30 bg-primary/5 px-4 py-4 text-center">
+            <p className="text-sm text-foreground">
+              You&apos;ve used all {ANON_MESSAGE_LIMIT} guest messages.
+            </p>
+            <a
+              href="/login"
+              className="mt-2 inline-block text-sm font-medium text-primary underline-offset-4 hover:underline"
+            >
+              Sign in for more messages and higher limits
+            </a>
+          </div>
+        )}
+
+        {outOfCredits && !thinking && (
+          <div className="animate-fade-up rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-4 text-center">
+            <p className="text-sm text-foreground">
+              You&apos;re out of credits.
+            </p>
+            <a
+              href="/dashboard"
+              className="mt-2 inline-block text-sm font-medium text-primary underline-offset-4 hover:underline"
+            >
+              Go to dashboard
+            </a>
+          </div>
+        )}
       </div>
 
       <div className="pb-5 pt-2">
-        <ChatComposer onSend={handleSend} disabled={thinking} />
+        <ChatComposer
+          onSend={handleSend}
+          disabled={thinking || anonLimitReached || outOfCredits}
+        />
         <p className="mt-2.5 text-center font-mono text-[0.65rem] uppercase tracking-[0.14em] text-muted-foreground">
-          Powered by your own local model · Not a demo
+          {isAuthed
+            ? '1 credit per second of thinking · 0.01 per 0.01s'
+            : `Guest mode · ${ANON_MESSAGE_LIMIT - anonMessageCount} messages left`}
         </p>
       </div>
     </div>

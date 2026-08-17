@@ -40,6 +40,22 @@ export function MessageBubble({ message }: { message: Message }) {
           {isUser ? 'You said: ' : 'Assistant said: '}
         </span>
         {message.content}
+        {!isUser && message.thinkingMs != null && (
+          <div className="mt-2 flex items-center gap-2 border-t border-border/40 pt-2 font-mono text-[0.65rem] uppercase tracking-[0.12em] text-muted-foreground">
+            <span>
+              {message.thinkingMs < 1000
+                ? `${message.thinkingMs}ms`
+                : `${(message.thinkingMs / 1000).toFixed(1)}s`}{' '}
+              thinking
+            </span>
+            {message.creditsUsed != null && (
+              <>
+                <span className="text-border">·</span>
+                <span>{message.creditsUsed} credits</span>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

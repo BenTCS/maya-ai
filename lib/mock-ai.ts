@@ -4,6 +4,8 @@ export type Message = {
   id: string
   role: Role
   content: string
+  thinkingMs?: number
+  creditsUsed?: number
 }
 
 const replies = [
@@ -35,3 +37,6 @@ export const suggestions = [
   'Give me a creative name',
   'Plan my weekend',
 ]
+
+// Anonymous (not-logged-in) users get a limited number of messages.
+export const ANON_MESSAGE_LIMIT = 5
