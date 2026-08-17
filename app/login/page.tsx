@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
-import { Sparkles, Loader2 } from 'lucide-react'
+import { Sparkles, Loader as Loader2 } from 'lucide-react'
 import { useAuth } from '@/components/auth/auth-provider'
 import { Button } from '@/components/ui/button'
 

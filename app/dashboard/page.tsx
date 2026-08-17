@@ -2,17 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from 'react'
 import { useRouter } from 'next/navigation'
-import {
-  Key,
-  Plus,
-  Trash2,
-  Copy,
-  Check,
-  Loader2,
-  Coins,
-  Activity,
-  ArrowLeft,
-} from 'lucide-react'
+import { Key, Plus, Trash2, Copy, Check, Loader as Loader2, Coins, Activity, ArrowLeft } from 'lucide-react'
 import { useAuth } from '@/components/auth/auth-provider'
 import { supabase, type ApiKey } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
